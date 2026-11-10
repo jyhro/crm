@@ -166,6 +166,35 @@
       />
     </div>
   </div>
+  <Dialog
+    v-model:open="showOutcomeDialog"
+    :title="__('Call outcome')"
+    :actions="[
+      {
+        label: __('Save'),
+        variant: 'solid',
+        onClick: saveOutcome,
+      },
+    ]"
+  >
+    <template #default>
+      <div class="flex flex-col gap-4">
+        <FormControl
+          v-model="selectedOutcome"
+          type="select"
+          :label="__('Outcome')"
+          :options="outcomeOptions"
+          :placeholder="__('Select outcome')"
+        />
+        <FormControl
+          v-model="outcomeComment"
+          type="textarea"
+          :label="__('Comment')"
+          :placeholder="__('How did the call go?')"
+        />
+      </div>
+    </template>
+  </Dialog>
 </template>
 
 <script setup>
@@ -177,7 +206,14 @@ import { useDoctypeModal } from '@/composables/doctypeModal'
 import { Device } from '@twilio/voice-sdk'
 import { useDraggable, useWindowSize } from '@vueuse/core'
 import { useTelemetry } from '@framework/ui/telemetry'
-import { Avatar, call, createResource } from 'frappe-ui'
+import {
+  Avatar,
+  call,
+  createResource,
+  Dialog,
+  FormControl,
+  toast,
+} from 'frappe-ui'
 import { ref, watch } from 'vue'
 
 const { capture } = useTelemetry()
@@ -238,6 +274,62 @@ function openNoteModal() {
       afterUpdate: updateNote,
     },
   })
+}
+
+const showOutcomeDialog = ref(false)
+const outcomeOptions = ref([])
+const selectedOutcome = ref('')
+const outcomeComment = ref('')
+const outcomeCallSid = ref('')
+
+async function openOutcomeDialog(callSid) {
+  outcomeCallSid.value = callSid
+  selectedOutcome.value = ''
+  outcomeComment.value = ''
+  try {
+    const list =
+      (await call('frappe.client.get_list', {
+        doctype: 'Call Outcome',
+        fields: ['name', 'title'],
+        order_by: 'title',
+        limit_page_length: 0,
+      })) || []
+    outcomeOptions.value = list.map((o) => ({
+      label: o.title || o.name,
+      value: o.name,
+    }))
+  } catch {
+    outcomeOptions.value = []
+  }
+  showOutcomeDialog.value = true
+}
+
+async function saveOutcome() {
+  const sid = outcomeCallSid.value
+  const comment = outcomeComment.value?.trim()
+  if (sid && (selectedOutcome.value || comment)) {
+    try {
+      if (selectedOutcome.value) {
+        await call('frappe.client.set_value', {
+          doctype: 'CRM Call Log',
+          name: sid,
+          fieldname: 'call_outcome',
+          value: selectedOutcome.value,
+        })
+      }
+      if (comment) {
+        await call('crm.integrations.api.add_note_to_call_log', {
+          call_sid: sid,
+          note: { content: comment },
+        })
+      }
+    } catch (err) {
+      // Keep the dialog open so the outcome is not lost
+      toast.error(err.messages?.[0] || __('Could not save the call outcome'))
+      return
+    }
+  }
+  showOutcomeDialog.value = false
 }
 
 async function updateNote(_note, isInsert = false) {
@@ -411,6 +503,7 @@ async function makeOutgoingCall(number) {
       })
       _call.on('disconnect', () => {
         log.value = `Call ended from makeOutgoing call disconnect.`
+        const endedCallSid = _call?.parameters?.CallSid
         calling.value = false
         onCall.value = false
         showCallPopup.value = false
@@ -424,9 +517,11 @@ async function makeOutgoingCall(number) {
           title: '',
           content: '',
         }
+        if (endedCallSid) openOutcomeDialog(endedCallSid)
       })
       _call.on('cancel', () => {
         log.value = `Call ended from makeOutgoing call cancel.`
+        const endedCallSid = _call?.parameters?.CallSid
         calling.value = false
         onCall.value = false
         showCallPopup.value = false
@@ -440,6 +535,7 @@ async function makeOutgoingCall(number) {
           content: '',
         }
         counterUp.value.stop()
+        if (endedCallSid) openOutcomeDialog(endedCallSid)
       })
     } catch (error) {
       log.value = `Could not connect call: ${error.message}`
