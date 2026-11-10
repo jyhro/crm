@@ -459,11 +459,10 @@ def _get_inline_quotation_settings():
 	return settings
 
 
-def _prepare_inline_quotation_items(items, customer=None):
+def _prepare_inline_quotation_items(items):
 	if not isinstance(items, list) or not items:
 		frappe.throw(_("At least one item is required"), frappe.ValidationError)
 
-	transaction_date = today()
 	prepared = []
 	for row in items:
 		item_code = row.get("item_code") if isinstance(row, dict) else None
@@ -476,25 +475,14 @@ def _prepare_inline_quotation_items(items, customer=None):
 		if qty <= 0:
 			frappe.throw(_("Quantity must be greater than zero"), frappe.ValidationError)
 
+		prepared_item = {"item_code": item_code, "qty": qty}
 		rate = row.get("rate")
-		if rate is None:
-			item = frappe.get_cached_doc("Item", item_code)
-			from erpnext.stock.get_item_details import get_item_price
-
-			prices = get_item_price(
-				frappe._dict(
-					price_list="Standard Selling",
-					uom=item.stock_uom,
-					transaction_date=transaction_date,
-					customer=customer,
-				),
-				item_code,
-			)
-			rate = prices[0]["price_list_rate"] if prices else 0
-		rate = flt(rate)
-		if rate < 0:
-			frappe.throw(_("Rate cannot be negative"), frappe.ValidationError)
-		prepared.append({"item_code": item_code, "qty": qty, "rate": rate})
+		if rate is not None:
+			rate = flt(rate)
+			if rate < 0:
+				frappe.throw(_("Rate cannot be negative"), frappe.ValidationError)
+			prepared_item["rate"] = rate
+		prepared.append(prepared_item)
 
 	return prepared
 
@@ -528,7 +516,7 @@ def create_quotation(crm_deal: str, items: list[dict]):
 			"valid_till": add_days(today(), 30),
 			"selling_price_list": "Standard Selling",
 			"order_type": "Sales",
-			"items": _prepare_inline_quotation_items(items, customer),
+			"items": _prepare_inline_quotation_items(items),
 		}
 	).insert()
 	return {"name": quotation.name, "url": get_url_to_form("Quotation", quotation.name)}
@@ -548,8 +536,7 @@ def update_quotation_items(name: str, items: list[dict]):
 		frappe.throw(_("This quotation is not linked to a CRM deal"), frappe.ValidationError)
 	_validate_inline_quotation_deal(quotation.crm_deal)
 
-	customer = get_local_customer(quotation.crm_deal)
-	quotation.set("items", _prepare_inline_quotation_items(items, customer))
+	quotation.set("items", _prepare_inline_quotation_items(items))
 	quotation.save()
 	return {"name": quotation.name}
 
