@@ -4,6 +4,7 @@ vi.mock('frappe-ui', () => ({ Dropdown: { render: () => null } }))
 vi.mock('@/stores/global', () => ({
   globalStore: () => ({ makeCall: vi.fn() }),
 }))
+vi.mock('@/composables/erpnext', () => ({ canCreateQuotations: ref(false) }))
 vi.mock('@/composables/whatsapp', () => ({ whatsappEnabled: ref(false) }))
 vi.mock('@/composables/telephony', () => ({ callEnabled: ref(false) }))
 

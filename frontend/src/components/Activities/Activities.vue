@@ -9,6 +9,7 @@
     :modalRef="modalRef"
     :tabs="tabs"
     :customPane="Boolean(tabComponent)"
+    @create-quotation="quotationsList?.openCreate()"
   />
   <FadedScrollableDiv class="flex flex-col h-full overflow-y-auto">
     <div v-if="tabComponent" class="flex flex-col h-full">
@@ -21,7 +22,12 @@
         :tab="currentTab"
       />
     </div>
-    <QuotationsList v-else-if="title == 'Quotations'" :deal="docname" />
+    <QuotationsList
+      v-else-if="title == 'Quotations'"
+      ref="quotationsList"
+      :deal="docname"
+      :deal-doc="doc"
+    />
     <div
       v-else-if="all_activities?.loading"
       class="flex flex-1 flex-col items-center justify-center gap-3 text-2xl-medium text-ink-gray-4"
@@ -680,6 +686,7 @@ const doc = computed(() => _document.doc || {})
 
 const reload_email = ref(false)
 const modalRef = ref(null)
+const quotationsList = ref(null)
 const showFilesUploader = ref(false)
 const fieldLayoutTabIndex = ref(0)
 const fieldLayoutTabName = ref('')

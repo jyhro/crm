@@ -1,5 +1,12 @@
 <template>
   <div class="flex h-full flex-col">
+    <QuotationModal
+      v-model:open="showQuotationModal"
+      :deal="deal"
+      :deal-doc="dealDoc"
+      :quotation-name="editingQuotation"
+      @saved="quotations.reload()"
+    />
     <div
       v-if="quotations.loading && !quotations.fetched"
       class="flex flex-1 flex-col items-center justify-center gap-3 text-2xl-medium text-ink-gray-4"
@@ -17,38 +24,46 @@
     />
     <div v-else class="flex flex-col px-3 pb-3 sm:px-10 sm:pb-5">
       <div v-for="(quotation, i) in rows" :key="quotation.name">
-        <a
-          :href="quotation.url"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="group -mx-3 flex cursor-pointer items-center gap-4 rounded-4 px-3 py-3 duration-300 ease-in-out hover:bg-surface-gray-1"
-        >
-          <div class="flex min-w-0 flex-1 flex-col gap-2 truncate text-base">
-            <div class="flex items-center gap-2">
-              <span class="truncate font-medium text-ink-gray-9">
-                {{ quotation.name }}
-              </span>
-              <Badge
-                :label="quotation.status"
-                :theme="statusTheme(quotation.status)"
-                variant="subtle"
-                size="sm"
-              />
-              <ArrowUpRightIcon
-                class="h-4 w-4 shrink-0 text-ink-gray-4 opacity-0 duration-200 group-hover:opacity-100"
-              />
+        <div class="group -mx-3 flex items-center gap-2 rounded-4 px-3 py-3 hover:bg-surface-gray-1">
+          <a
+            :href="quotation.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
+          >
+            <div class="flex min-w-0 flex-1 flex-col gap-2 truncate text-base">
+              <div class="flex items-center gap-2">
+                <span class="truncate font-medium text-ink-gray-9">
+                  {{ quotation.name }}
+                </span>
+                <Badge
+                  :label="quotation.status"
+                  :theme="statusTheme(quotation.status)"
+                  variant="subtle"
+                  size="sm"
+                />
+                <ArrowUpRightIcon
+                  class="h-4 w-4 shrink-0 text-ink-gray-4 opacity-0 duration-200 group-hover:opacity-100"
+                />
+              </div>
+              <div class="flex items-center gap-2 text-ink-gray-6">
+                <span class="tabular-nums text-ink-gray-8">
+                  {{
+                    formatCurrency(quotation.grand_total, '', quotation.currency)
+                  }}
+                </span>
+                <span class="text-ink-gray-4">·</span>
+                <span>{{ dateLabel(quotation) }}</span>
+              </div>
             </div>
-            <div class="flex items-center gap-2 text-ink-gray-6">
-              <span class="tabular-nums text-ink-gray-8">
-                {{
-                  formatCurrency(quotation.grand_total, '', quotation.currency)
-                }}
-              </span>
-              <span class="text-ink-gray-4">·</span>
-              <span>{{ dateLabel(quotation) }}</span>
-            </div>
-          </div>
-        </a>
+          </a>
+          <Button
+            v-if="quotation.docstatus === 0"
+            variant="subtle"
+            :label="__('Edit draft')"
+            @click.stop="editQuotation(quotation)"
+          />
+        </div>
         <div
           v-if="i < rows.length - 1"
           class="h-px border-t border-outline-elevation-2"
@@ -60,19 +75,24 @@
 
 <script setup>
 import EmptyState from '@/components/ListViews/EmptyState.vue'
+import QuotationModal from '@/components/Activities/QuotationModal.vue'
 import ArrowUpRightIcon from '@/components/Icons/ArrowUpRightIcon.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
 import { formatDate } from '@/utils'
 import { formatCurrency } from '@/utils/numberFormat.js'
 import { globalStore } from '@/stores/global'
-import { Badge, createResource } from 'frappe-ui'
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { Badge, Button, createResource } from 'frappe-ui'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const { $socket } = globalStore()
 
 const props = defineProps({
   deal: { type: String, required: true },
+  dealDoc: { type: Object, default: () => ({}) },
 })
+
+const showQuotationModal = ref(false)
+const editingQuotation = ref('')
 
 const quotations = createResource({
   url: 'crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.get_deal_quotations',
@@ -81,6 +101,19 @@ const quotations = createResource({
 })
 
 const rows = computed(() => quotations.data || [])
+
+function openCreate() {
+  editingQuotation.value = ''
+  showQuotationModal.value = true
+}
+
+function editQuotation(quotation) {
+  if (quotation.docstatus !== 0) return
+  editingQuotation.value = quotation.name
+  showQuotationModal.value = true
+}
+
+defineExpose({ openCreate })
 
 // live-refresh when a quotation for this deal is created/updated/deleted (same-site)
 function onQuotationUpdate(data) {
