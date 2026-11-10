@@ -9,7 +9,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 from frappe.frappeclient import FrappeClient
 from frappe.model.document import Document
-from frappe.utils import get_url_to_form, get_url_to_list
+from frappe.utils import add_days, flt, get_url_to_form, get_url_to_list, today
 
 
 def _is_erpnext_installed():
@@ -393,7 +393,15 @@ def can_create_quotations():
 	return _quotation_permission("create")
 
 
-QUOTATION_LIST_FIELDS = ["name", "status", "grand_total", "currency", "transaction_date", "valid_till"]
+QUOTATION_LIST_FIELDS = [
+	"name",
+	"status",
+	"docstatus",
+	"grand_total",
+	"currency",
+	"transaction_date",
+	"valid_till",
+]
 
 
 @frappe.whitelist()
@@ -440,6 +448,110 @@ def get_deal_quotations(crm_deal: str):
 	for row in rows:
 		row["url"] = f"{settings.erpnext_site_url}/app/quotation/{row['name']}"
 	return rows
+
+
+def _get_inline_quotation_settings():
+	settings = _get_enabled_settings()
+	if settings.is_erpnext_in_different_site:
+		frappe.throw(_("Inline quotations require ERPNext on the same site"), frappe.ValidationError)
+	if not _is_erpnext_installed():
+		frappe.throw(_("ERPNext is not installed in the current site"), frappe.ValidationError)
+	return settings
+
+
+def _prepare_inline_quotation_items(items, customer=None):
+	if not isinstance(items, list) or not items:
+		frappe.throw(_("At least one item is required"), frappe.ValidationError)
+
+	transaction_date = today()
+	prepared = []
+	for row in items:
+		item_code = row.get("item_code") if isinstance(row, dict) else None
+		if not item_code or not frappe.db.exists("Item", item_code):
+			frappe.throw(_("Select a valid item for every quotation row"), frappe.ValidationError)
+		if not frappe.has_permission("Item", ptype="read", doc=item_code):
+			frappe.throw(_("Not permitted to read item {0}").format(item_code), frappe.PermissionError)
+
+		qty = flt(row.get("qty", 1))
+		if qty <= 0:
+			frappe.throw(_("Quantity must be greater than zero"), frappe.ValidationError)
+
+		rate = row.get("rate")
+		if rate is None:
+			item = frappe.get_cached_doc("Item", item_code)
+			from erpnext.stock.get_item_details import get_item_price
+
+			prices = get_item_price(
+				frappe._dict(
+					price_list="Standard Selling",
+					uom=item.stock_uom,
+					transaction_date=transaction_date,
+					customer=customer,
+				),
+				item_code,
+			)
+			rate = prices[0]["price_list_rate"] if prices else 0
+		rate = flt(rate)
+		if rate < 0:
+			frappe.throw(_("Rate cannot be negative"), frappe.ValidationError)
+		prepared.append({"item_code": item_code, "qty": qty, "rate": rate})
+
+	return prepared
+
+
+def _validate_inline_quotation_deal(crm_deal: str):
+	if not isinstance(crm_deal, str) or not frappe.db.exists("CRM Deal", crm_deal):
+		frappe.throw(_("Invalid deal"), frappe.ValidationError)
+	if not frappe.has_permission("CRM Deal", doc=crm_deal):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def create_quotation(crm_deal: str, items: list[dict]):
+	settings = _get_inline_quotation_settings()
+	_validate_inline_quotation_deal(crm_deal)
+	if not frappe.has_permission("Quotation", ptype="create"):
+		frappe.throw(_("Not permitted to create quotations"), frappe.PermissionError)
+	if not settings.erpnext_company or not frappe.db.exists("Company", settings.erpnext_company):
+		frappe.throw(_("Select a valid ERPNext company in ERPNext CRM Settings"), frappe.ValidationError)
+
+	customer = get_local_customer(crm_deal)
+	quotation = frappe.get_doc(
+		{
+			"doctype": "Quotation",
+			"quotation_to": "Customer" if customer else "CRM Deal",
+			"party_name": customer or crm_deal,
+			"crm_deal": crm_deal,
+			"company": settings.erpnext_company,
+			"contact_person": get_primary_contact(crm_deal),
+			"transaction_date": today(),
+			"valid_till": add_days(today(), 30),
+			"selling_price_list": "Standard Selling",
+			"order_type": "Sales",
+			"items": _prepare_inline_quotation_items(items, customer),
+		}
+	).insert()
+	return {"name": quotation.name, "url": get_url_to_form("Quotation", quotation.name)}
+
+
+@frappe.whitelist()
+def update_quotation_items(name: str, items: list[dict]):
+	_get_inline_quotation_settings()
+	if not frappe.has_permission("Quotation", ptype="read", doc=name):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	quotation = frappe.get_doc("Quotation", name)
+	if quotation.docstatus != 0:
+		frappe.throw(_("Only draft quotations can be edited from CRM"), frappe.ValidationError)
+	if not frappe.has_permission("Quotation", ptype="write", doc=quotation):
+		frappe.throw(_("Not permitted to edit this quotation"), frappe.PermissionError)
+	if not quotation.crm_deal:
+		frappe.throw(_("This quotation is not linked to a CRM deal"), frappe.ValidationError)
+	_validate_inline_quotation_deal(quotation.crm_deal)
+
+	customer = get_local_customer(quotation.crm_deal)
+	quotation.set("items", _prepare_inline_quotation_items(items, customer))
+	quotation.save()
+	return {"name": quotation.name}
 
 
 def notify_deal_quotation_change(doc, method=None):
