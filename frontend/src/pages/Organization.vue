@@ -19,6 +19,11 @@
         @done="onEnriched"
       />
       <Button
+        :label="__('Crear pedido')"
+        iconLeft="lucide-shopping-cart"
+        @click="openSalesOrderModal()"
+      />
+      <Button
         v-if="activeTab === 'deals'"
         :label="__('New Deal')"
         iconLeft="lucide-plus"
@@ -185,8 +190,14 @@
           :columns="columns"
           :options="{ selectable: false, showTooltip: false }"
         />
+        <SalesOrdersList
+          v-if="tab.value === 'sales_orders'"
+          ref="salesOrdersList"
+          :organization="props.organizationId"
+          @edit="editSalesOrder"
+        />
         <EmptyState
-          v-if="!rows.length"
+          v-if="tab.value !== 'sales_orders' && !rows.length"
           :icon="tab.iconLeft"
           :name="__(tab.label)"
           :description="
@@ -221,6 +232,13 @@
     v-model="showDealModal"
     :defaults="{ organization: props.organizationId }"
   />
+  <SalesOrderModal
+    v-if="showSalesOrderModal"
+    v-model:open="showSalesOrderModal"
+    :organization="props.organizationId"
+    :order-name="editingSalesOrder"
+    @saved="onSalesOrderSaved"
+  />
 </template>
 
 <script setup>
@@ -231,13 +249,16 @@ import Icon from '@/components/Icon.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import DealsListView from '@/components/ListViews/DealsListView.vue'
 import ContactsListView from '@/components/ListViews/ContactsListView.vue'
+import SalesOrdersList from '@/components/ListViews/SalesOrdersList.vue'
 import WebsiteIcon from '@/components/Icons/WebsiteIcon.vue'
 import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import DealsIcon from '@/components/Icons/DealsIcon.vue'
 import ContactsIcon from '@/components/Icons/ContactsIcon.vue'
+import FileTextIcon from '@/components/Icons/FileTextIcon.vue'
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
 import ContactModal from '@/components/Modals/ContactModal.vue'
 import DealModal from '@/components/Modals/DealModal.vue'
+import SalesOrderModal from '@/components/Modals/SalesOrderModal.vue'
 import Link from '@/components/Controls/Link.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import EnrichFromWebsite from '@/components/EnrichFromWebsite.vue'
@@ -291,6 +312,9 @@ const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showContactModal = ref(false)
 const showDealModal = ref(false)
+const showSalesOrderModal = ref(false)
+const editingSalesOrder = ref('')
+const salesOrdersList = ref(null)
 const _contact = ref({})
 
 const {
@@ -396,6 +420,20 @@ function openWebsite() {
   openExternalWebsite(organization.doc.website)
 }
 
+function openSalesOrderModal(orderName = '') {
+  editingSalesOrder.value = orderName || ''
+  showSalesOrderModal.value = true
+}
+
+function editSalesOrder(order) {
+  openSalesOrderModal(order?.name || '')
+}
+
+function onSalesOrderSaved() {
+  salesOrdersList.value?.reload?.()
+  salesOrdersCount.reload()
+}
+
 const sections = createResource({
   url: 'crm.fcrm.doctype.crm_fields_layout.crm_fields_layout.get_sidepanel_sections',
   cache: ['sidePanelSections', 'CRM Organization'],
@@ -428,6 +466,13 @@ function getParsedSections(_sections) {
 }
 
 const activeTab = ref('deals')
+const salesOrdersCount = createResource({
+  url: 'crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.get_organization_sales_orders',
+  params: { organization: props.organizationId },
+  cache: ['sales_orders_count', props.organizationId],
+  auto: true,
+  transform: (data) => data || [],
+})
 const tabs = [
   {
     value: 'deals',
@@ -440,6 +485,12 @@ const tabs = [
     label: 'Contacts',
     iconLeft: ContactsIcon,
     count: computed(() => contacts.data?.length),
+  },
+  {
+    value: 'sales_orders',
+    label: 'Pedidos',
+    iconLeft: FileTextIcon,
+    count: computed(() => salesOrdersCount.data?.length),
   },
 ]
 

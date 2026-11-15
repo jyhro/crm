@@ -817,6 +817,180 @@ def create_customer_from_deal(doc, erpnext_crm_settings):
 	return customer_name
 
 
+def _get_or_create_customer_for_organization(organization: str) -> str:
+	organization = (organization or "").strip()
+	if not organization:
+		frappe.throw(_("Organization is required"))
+	customer = frappe.db.get_value("Customer", {"customer_name": organization}, "name")
+	if not customer:
+		customer = frappe.db.exists("Customer", organization)
+	if not customer:
+		customer_group = (
+			frappe.db.get_single_value("Selling Settings", "customer_group")
+			or frappe.db.get_value("Customer Group", {"is_group": 0}, "name")
+			or "All Customer Groups"
+		)
+		territory = frappe.db.get_value("Territory", {"is_group": 0}, "name") or "All Territories"
+		doc = frappe.get_doc(
+			{
+				"doctype": "Customer",
+				"customer_name": organization,
+				"customer_type": "Company",
+				"customer_group": customer_group,
+				"territory": territory,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		customer = doc.name
+	return customer
+
+
+@frappe.whitelist()
+def get_sales_order_url_for_organization(organization: str):
+	if not _is_erpnext_installed():
+		frappe.throw(_("ERPNext is not installed on this site"))
+	settings = frappe.get_single("ERPNext CRM Settings")
+	if not settings.enabled or settings.is_erpnext_in_different_site:
+		frappe.throw(_("ERPNext is not integrated locally with the CRM"))
+	customer = _get_or_create_customer_for_organization(organization)
+	from urllib.parse import quote
+	return f"/app/sales-order/new-sales-order-1?customer={quote(customer, safe='')}"
+
+
+SALES_ORDER_LIST_FIELDS = [
+	"name", "status", "docstatus", "grand_total", "currency", "transaction_date", "delivery_date", "customer", "customer_name"
+]
+
+
+@frappe.whitelist()
+def get_organization_sales_orders(organization: str):
+	if not isinstance(organization, str):
+		frappe.throw(_("Invalid organization"), frappe.ValidationError)
+	settings = frappe.get_single("ERPNext CRM Settings")
+	if not settings.enabled or settings.is_erpnext_in_different_site or not _is_erpnext_installed():
+		return []
+	if not frappe.has_permission("CRM Organization", doc=organization):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.has_permission("Sales Order", ptype="read"):
+		return []
+	customer = frappe.db.get_value("Customer", {"customer_name": organization}, "name") or (
+		organization if frappe.db.exists("Customer", organization) else None
+	)
+	if not customer:
+		return []
+	rows = frappe.get_list(
+		"Sales Order",
+		filters={"customer": customer},
+		fields=SALES_ORDER_LIST_FIELDS,
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+	for row in rows:
+		row["url"] = get_url_to_form("Sales Order", row["name"])
+	return rows
+
+
+def _prepare_inline_sales_order_items(items):
+	if not isinstance(items, list) or not items:
+		frappe.throw(_("At least one item is required"), frappe.ValidationError)
+	prepared = []
+	for row in items:
+		item_code = row.get("item_code") if isinstance(row, dict) else None
+		if not item_code or not frappe.db.exists("Item", item_code):
+			frappe.throw(_("Select a valid item for every row"), frappe.ValidationError)
+		if not frappe.has_permission("Item", ptype="read", doc=item_code):
+			frappe.throw(_("Not permitted to read item {0}").format(item_code), frappe.PermissionError)
+		qty = flt(row.get("qty", 1))
+		if qty <= 0:
+			frappe.throw(_("Quantity must be greater than zero"), frappe.ValidationError)
+		prepared_item = {"item_code": item_code, "qty": qty, "delivery_date": row.get("delivery_date") or add_days(today(), 7)}
+		rate = row.get("rate")
+		if rate is not None and rate != "":
+			rate = flt(rate)
+			if rate < 0:
+				frappe.throw(_("Rate cannot be negative"), frappe.ValidationError)
+			prepared_item["rate"] = rate
+		prepared.append(prepared_item)
+	return prepared
+
+
+def _ensure_deal_for_organization(organization: str):
+	"""Create a CRM Deal (oportunidad) for the organization if none exists."""
+	if not frappe.db.exists("DocType", "CRM Deal"):
+		return None
+	existing = frappe.db.exists("CRM Deal", {"organization": organization})
+	if existing:
+		return existing
+	status = frappe.db.get_value("CRM Deal Status", {}, "name", order_by="position asc")
+	if not status:
+		return None
+	deal = frappe.get_doc(
+		{
+			"doctype": "CRM Deal",
+			"organization": organization,
+			"organization_name": organization,
+			"status": status,
+			"deal_owner": frappe.session.user,
+		}
+	)
+	deal.insert(ignore_permissions=True)
+	return deal.name
+
+
+@frappe.whitelist()
+def create_organization_sales_order(organization: str, items: list[dict], delivery_date: str | None = None):
+	settings = _get_enabled_settings()
+	if settings.is_erpnext_in_different_site or not _is_erpnext_installed():
+		frappe.throw(_("Inline sales orders require ERPNext on the same site"), frappe.ValidationError)
+	if not frappe.has_permission("CRM Organization", doc=organization):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if not frappe.has_permission("Sales Order", ptype="create"):
+		frappe.throw(_("Not permitted to create sales orders"), frappe.PermissionError)
+	if not settings.erpnext_company or not frappe.db.exists("Company", settings.erpnext_company):
+		frappe.throw(_("Select a valid ERPNext company in ERPNext CRM Settings"), frappe.ValidationError)
+	# organización === cliente
+	customer = _get_or_create_customer_for_organization(organization)
+	prepared = _prepare_inline_sales_order_items(items)
+	d_date = delivery_date or add_days(today(), 7)
+	for it in prepared:
+		it["delivery_date"] = d_date
+	so = frappe.get_doc(
+		{
+			"doctype": "Sales Order",
+			"customer": customer,
+			"company": settings.erpnext_company,
+			"transaction_date": today(),
+			"delivery_date": d_date,
+			"selling_price_list": "Standard Selling",
+			"order_type": "Sales",
+			"items": prepared,
+		}
+	).insert()
+	# auto-generar oportunidad al crear pedido desde organización
+	_ensure_deal_for_organization(organization)
+	return {"name": so.name, "url": get_url_to_form("Sales Order", so.name)}
+
+
+@frappe.whitelist()
+def update_sales_order_items(name: str, items: list[dict], delivery_date: str | None = None):
+	_get_inline_quotation_settings()  # ensures local erpnext + enabled
+	if not frappe.has_permission("Sales Order", ptype="read", doc=name):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	so = frappe.get_doc("Sales Order", name)
+	if so.docstatus != 0:
+		frappe.throw(_("Only draft sales orders can be edited from CRM"), frappe.ValidationError)
+	if not frappe.has_permission("Sales Order", ptype="write", doc=so):
+		frappe.throw(_("Not permitted to edit this sales order"), frappe.PermissionError)
+	prepared = _prepare_inline_sales_order_items(items)
+	if delivery_date:
+		so.delivery_date = delivery_date
+		for it in prepared:
+			it["delivery_date"] = delivery_date
+	so.set("items", prepared)
+	so.save()
+	return {"name": so.name}
+
+
 @frappe.whitelist()
 def get_crm_form_script():
 	return """class CRMDeal {

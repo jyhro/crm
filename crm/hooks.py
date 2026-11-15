@@ -256,6 +256,9 @@ if int(frappe.__version__.split(".")[0]) < 16:
 # Hook on document methods and events
 
 doc_events = {
+	"TP Call Log": {
+		"on_update": ["crm.integrations.telephony_sync.mirror_tp_call_log"],
+	},
 	"Contact": {
 		"validate": ["crm.api.contact.validate"],
 	},
