@@ -107,7 +107,9 @@ def accept_invitation(key: str | None = None):
 	if not result:
 		frappe.throw(_("Invalid or expired key"))
 	invitation = frappe.get_doc("CRM Invitation", result[0])
-	is_new_user = invitation.accept()
+	from crm.ig_extensions.permissions.profile import accepting_validated_invitation
+	with accepting_validated_invitation(invitation.email):
+		is_new_user = invitation.accept()
 	invitation.reload()
 
 	# this is a GET request, which is rolled back unless a commit is requested

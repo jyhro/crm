@@ -215,6 +215,17 @@ class TestCRMInvitation(FrappeTestCase):
 		frappe.set_user("Administrator")
 		self.assertEqual(frappe.db.get_value("CRM Invitation", invitation.name, "status"), "Accepted")
 
+	def test_valid_invitation_does_not_allow_unrelated_account_creation(self):
+		from crm.api import accept_invitation
+
+		invitation = self.make_invitation(email="scoped-invitee@example.com", role="Sales User")
+		frappe.set_user("Guest")
+		self.addCleanup(frappe.set_user, "Administrator")
+		accept_invitation(key=invitation.key)
+		self.assertIsNone(frappe.flags.get("crm_invitation_account"))
+		with self.assertRaises(frappe.PermissionError):
+			frappe.get_doc({"doctype": "User", "email": "uninvited-account@example.com", "first_name": "Uninvited", "send_welcome_email": 0}).insert(ignore_permissions=True)
+
 	def insert_as_session_user(self, email, role):
 		with patch.object(frappe, "sendmail"):
 			return frappe.get_doc(doctype="CRM Invitation", email=email, role=role).insert()

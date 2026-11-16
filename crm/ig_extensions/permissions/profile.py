@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import frappe
 from frappe import _
 
@@ -18,8 +20,22 @@ def _profile_value(value):
 	return value
 
 
+@contextmanager
+def accepting_validated_invitation(email):
+	"""Internal scope, used only after the invitation token has been validated."""
+	previous = frappe.flags.get("crm_invitation_account")
+	frappe.flags.crm_invitation_account = email.lower()
+	try:
+		yield
+	finally:
+		frappe.flags.crm_invitation_account = previous
+
+
 def validate_profile(doc, method=None):
 	if frappe.session.user == "Administrator" or "System Manager" in frappe.get_roles():
+		return
+	# This request-local capability cannot be supplied through a User payload.
+	if frappe.flags.get("crm_invitation_account") == (doc.email or doc.name or "").lower():
 		return
 	if doc.is_new() or doc.name != frappe.session.user:
 		frappe.throw(_("Only administrators can manage user accounts."), frappe.PermissionError)
