@@ -302,9 +302,10 @@ class TestCRMCallLog(IntegrationTestCase):
 				"lead_owner": "Administrator",
 			}
 		).insert()
-		call = create_test_call_log(reference_doctype="CRM Lead", reference_docname=lead.name)
+		user = create_sales_user()
+		call = create_test_call_log(type="Incoming", caller=None, receiver=user, reference_doctype="CRM Lead", reference_docname=lead.name)
 
-		frappe.set_user(create_sales_user())
+		frappe.set_user(user)
 		try:
 			result = get_call_log(call.name)
 		finally:
@@ -385,15 +386,16 @@ class TestCRMCallLog(IntegrationTestCase):
 	def test_call_log_hides_referenced_lead_name_user_cannot_read(self):
 		referenced = create_test_lead("Referenced Lead", "+919876500004")
 		create_test_lead("Other Lead", "+919876500004")
+		user = create_sales_user()
 		call = create_test_call_log(
 			type="Outgoing",
-			caller="Administrator",
+			caller=user,
 			to="+919876500004",
 			reference_doctype="CRM Lead",
 			reference_docname=referenced.name,
 		)
 
-		frappe.set_user(create_sales_user())
+		frappe.set_user(user)
 		try:
 			result = get_call_log(call.name)
 		finally:

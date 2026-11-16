@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.tests.utils import make_test_records
+from frappe.tests.utils import make_test_records, change_settings
 from frappe.utils import add_days, get_first_day, get_last_day, nowdate
 
 from crm.api.dashboard import (
@@ -50,6 +50,8 @@ class TestDashboard(IntegrationTestCase):
 		for doctype in ["CRM Lead Status", "CRM Deal Status", "CRM Lead Source", "CRM Lost Reason", "CRM Organization"]:
 			make_test_records(doctype)
 		frappe.db.commit()
+		# Expected monetary fixtures are USD, independent of the site default.
+		cls.enterClassContext(change_settings("FCRM Settings", currency="USD"))
 
 		# Use an empty, historical month, not the site's current business period.
 		# Materialize this class's exact 35/32 JSON fixtures inside its rollback.
@@ -68,6 +70,12 @@ class TestDashboard(IntegrationTestCase):
 				if doctype == "CRM Deal" and doc.closed_date:
 					values["closed_date"] = str(start) + " 12:00:00"
 				frappe.db.set_value(doctype, doc.name, values, update_modified=False)
+
+	def setUp(self):
+		super().setUp()
+		# Keep class fixtures, but roll back each case's stage/configuration changes.
+		frappe.db.savepoint("dashboard_case")
+		self.addCleanup(frappe.db.rollback, save_point="dashboard_case")
 
 	@classmethod
 	def tearDownClass(cls):
@@ -476,6 +484,7 @@ class TestDashboard(IntegrationTestCase):
 		).insert()
 
 		frappe.db.set_value("CRM Deal", deal.name, "creation", str(self.from_date) + " 12:00:00", update_modified=False)
+		deal.reload()
 
 		# Toggle the status back and forth: this appends multiple status change log rows,
 		# including two "Won" transitions and one "Negotiation" transition.
@@ -871,3 +880,91 @@ class TestDashboardContributedCharts(IntegrationTestCase):
 			"average_time_to_close_a_deal",
 		}
 		self.assertEqual(contributed_values, set())
+
+
+class TestDashboardPermissions(IntegrationTestCase):
+	"""Real SQL, distinct users and documents; no mocked permission results."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.set_user("Administrator")
+		self.addCleanup(frappe.set_user, "Administrator")
+		self.addCleanup(frappe.db.rollback)
+		self.enterContext(change_settings("FCRM Settings", currency="USD"))
+		self.addCleanup(frappe.set_user, "Administrator")
+		self.users = []
+		for role in ["Sales User", "Sales User", "Sales Manager"]:
+			doc = frappe.get_doc({"doctype": "User", "email": "dashboard-" + frappe.generate_hash(length=10) + "@example.com", "first_name": "Dashboard test", "send_welcome_email": 0, "roles": [{"role": role}]}).insert()
+			self.users.append(doc.name)
+		self.seller, self.other, self.manager = self.users
+		start = frappe.utils.getdate("2000-01-01")
+		while any(frappe.db.exists(dt, {"creation": ["between", [add_days(start, -31), get_last_day(start)]]}) for dt in ["CRM Lead", "CRM Deal"]):
+			start = frappe.utils.add_months(start, 2)
+		self.start, self.end = str(start), str(get_last_day(start))
+		self.leads, self.deals = [], []
+		for user, value in [(self.seller, 10), (self.other, 90)]:
+			lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Dashboard cohort", "lead_owner": user, "status": "New Lead"}).insert()
+			deal = frappe.get_doc({"doctype": "CRM Deal", "organization": "Acme Corp", "deal_owner": user, "status": "Qualification", "currency": "USD", "deal_value": value}).insert()
+			deal.status = "Negotiation"
+			deal.save()
+			for doc in [lead, deal]:
+				frappe.db.set_value(doc.doctype, doc.name, "creation", self.start + " 12:00:00", update_modified=False)
+			self.leads.append(lead.name)
+			self.deals.append(deal.name)
+
+	def test_seller_scope_applies_to_counts_values_series_and_funnel(self):
+		frappe.set_user(self.seller)
+		self.assertEqual(get_total_leads(self.start, self.end)["value"], 1)
+		self.assertEqual(get_ongoing_deals(self.start, self.end)["value"], 1)
+		self.assertEqual(get_average_deal_value(self.start, self.end)["value"], 10)
+		self.assertEqual(sum(row["leads"] for row in get_sales_trend(self.start, self.end)["data"]), 1)
+		self.assertEqual(sum(row["deals"] for row in get_sales_trend(self.start, self.end)["data"]), 1)
+		self.assertEqual(sum(row["count"] for row in get_leads_by_source(self.start, self.end)["data"]), 1)
+		self.assertEqual({row["stage"]: row["count"] for row in get_deal_status_change_counts(self.start, self.end)}["Negotiation"], 1)
+		# An explicit foreign salesperson never widens the seller's chart access.
+		self.assertEqual(get_chart("total_leads", "number_chart", self.start, self.end, self.other)["value"], 1)
+
+	def test_document_shares_cannot_expand_aggregate_portfolio(self):
+		for doctype, name in [("CRM Lead", self.leads[1]), ("CRM Deal", self.deals[1])]:
+			frappe.share.add(doctype, name, self.seller, read=1, flags={"ignore_share_permission": True})
+		frappe.set_user(self.seller)
+		self.assertEqual(get_total_leads(self.start, self.end)["value"], 1)
+		self.assertEqual(get_average_deal_value(self.start, self.end)["value"], 10)
+
+	def test_legitimate_assignment_is_included_in_authorized_portfolio(self):
+		frappe.get_doc({"doctype": "ToDo", "allocated_to": self.seller, "description": "Authorized assignment", "reference_type": "CRM Lead", "reference_name": self.leads[1]}).insert()
+		frappe.set_user(self.seller)
+		self.assertEqual(get_total_leads(self.start, self.end)["value"], 2)
+
+	def test_manager_hierarchy_and_administrator_scope(self):
+		frappe.db.set_single_value("FCRM Settings", "enable_sales_hierarchy", 1)
+		root = frappe.get_doc({"doctype": "CRM Sales Hierarchy", "user": self.manager, "is_group": 1}).insert()
+		frappe.get_doc({"doctype": "CRM Sales Hierarchy", "user": self.seller, "reports_to": root.name}).insert()
+		frappe.get_doc({"doctype": "CRM Sales Hierarchy", "user": self.other}).insert()
+		frappe.set_user(self.manager)
+		self.assertEqual(get_total_leads(self.start, self.end)["value"], 1)
+		self.assertEqual(get_average_deal_value(self.start, self.end)["value"], 10)
+		with self.assertRaises(frappe.PermissionError):
+			get_chart("total_leads", "number_chart", self.start, self.end, self.other)
+		with self.assertRaises(frappe.PermissionError):
+			get_dashboard(self.start, self.end, self.other)
+		frappe.set_user("Administrator")
+		self.assertEqual(get_total_leads(self.start, self.end)["value"], 2)
+		self.assertEqual(get_average_deal_value(self.start, self.end)["value"], 50)
+
+	def test_inclusive_dates_compare_equal_length_previous_period(self):
+		# Current: day 1 and the last second of day 2. Previous: both preceding days.
+		frappe.db.set_value("CRM Lead", self.leads[1], "creation", str(add_days(self.start, 2)) + " 00:00:00", update_modified=False)
+		for day, time in [(-2, "12:00:00"), (-1, "12:00:00"), (1, "23:59:59")]:
+			lead = frappe.get_doc({"doctype": "CRM Lead", "first_name": "Date boundary", "lead_owner": self.seller}).insert()
+			frappe.db.set_value("CRM Lead", lead.name, "creation", str(add_days(self.start, day)) + " " + time, update_modified=False)
+		result = get_total_leads(self.start, str(add_days(self.start, 1)))
+		self.assertEqual(result["value"], 2)
+		self.assertEqual(result["delta"], 0)
+
+	def test_initializing_dashboard_does_not_commit_callers_transaction(self):
+		if frappe.db.exists("CRM Dashboard", "Manager Dashboard"):
+			frappe.delete_doc("CRM Dashboard", "Manager Dashboard", force=True)
+		with patch.object(frappe.db, "commit") as commit:
+			self.assertTrue(get_dashboard(self.start, self.end))
+			commit.assert_not_called()
