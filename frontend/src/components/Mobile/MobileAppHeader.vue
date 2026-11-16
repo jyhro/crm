@@ -4,6 +4,7 @@
       <Button
         class="size-7"
         variant="ghost"
+        :aria-label="__('Abrir navegación')"
         @click="sidebarOpened = !sidebarOpened"
       >
         <MenuIcon class="h-4 text-ink-gray-9" />

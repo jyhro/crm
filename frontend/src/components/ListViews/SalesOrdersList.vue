@@ -13,17 +13,14 @@
     <div v-else class="flex flex-col px-3 pb-3 sm:px-10 sm:pb-5">
       <div v-for="(order, i) in rows" :key="order.name">
         <div class="group -mx-3 flex items-center gap-2 rounded-4 px-3 py-3 hover:bg-surface-gray-1">
-          <a
-            :href="order.url"
-            target="_blank"
-            rel="noopener noreferrer"
+          <router-link
+            :to="{ name: 'Sales Order', params: { orderId: order.name } }"
             class="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
           >
             <div class="flex min-w-0 flex-1 flex-col gap-2 truncate text-base">
               <div class="flex items-center gap-2">
                 <span class="truncate font-medium text-ink-gray-9">{{ order.name }}</span>
-                <Badge :label="order.status" variant="subtle" size="sm" />
-                <ArrowUpRightIcon class="h-4 w-4 shrink-0 text-ink-gray-4 opacity-0 duration-200 group-hover:opacity-100" />
+                <Badge v-bind="salesOrderState(order)" variant="subtle" size="sm" />
               </div>
               <div class="flex items-center gap-2 text-ink-gray-6">
                 <span class="tabular-nums text-ink-gray-8">
@@ -33,7 +30,7 @@
                 <span>{{ formatDate(order.transaction_date || order.delivery_date) }}</span>
               </div>
             </div>
-          </a>
+          </router-link>
           <Button
             v-if="order.docstatus === 0"
             variant="subtle"
@@ -48,10 +45,10 @@
 </template>
 
 <script setup>
-import ArrowUpRightIcon from '@/components/Icons/ArrowUpRightIcon.vue'
 import LoadingIndicator from '@/components/Icons/LoadingIndicator.vue'
 import { formatDate } from '@/utils'
 import { formatCurrency } from '@/utils/numberFormat.js'
+import { salesOrderState } from '@/utils/salesOrders'
 import { Badge, Button, createResource } from 'frappe-ui'
 import { computed } from 'vue'
 

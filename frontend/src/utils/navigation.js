@@ -6,19 +6,22 @@ import OrganizationsIcon from '@/components/Icons/OrganizationsIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
+import LucideShoppingCart from '~icons/lucide/shopping-cart'
+import LucidePackage from '~icons/lucide/package'
 import router from '@/router'
 
 export const navigationItems = [
   {
-    label: 'Dashboard',
+    label: 'Reportes',
     icon: LucideLayoutDashboard,
     route: 'Dashboard',
-    desktopOnly: true,
   },
   { label: 'Leads', icon: LeadsIcon, route: 'Leads' },
   { label: 'Deals', icon: DealsIcon, route: 'Deals' },
   { label: 'Contacts', icon: ContactsIcon, route: 'Contacts' },
-  { label: 'Organizations', icon: OrganizationsIcon, route: 'Organizations' },
+  { label: 'Clientes', icon: OrganizationsIcon, route: 'Organizations' },
+  { label: 'Pedidos', icon: LucideShoppingCart, route: 'Sales Orders' },
+  { label: 'Productos', icon: LucidePackage, route: 'Products' },
   { label: 'Notes', icon: NoteIcon, route: 'Notes' },
   { label: 'Tasks', icon: TaskIcon, route: 'Tasks' },
   { label: 'Call Logs', icon: PhoneIcon, route: 'Call Logs' },

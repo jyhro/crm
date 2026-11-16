@@ -31,7 +31,7 @@
       <div
         v-for="note in notes.data.data"
         :key="note.name"
-        class="group flex h-56 cursor-pointer flex-col justify-between gap-2 rounded-6 border px-5 py-4 shadow-sm hover:bg-surface-sidebar"
+        class="group flex min-h-56 cursor-pointer flex-col justify-between gap-2 rounded-6 border px-5 py-4 shadow-sm hover:bg-surface-sidebar"
         @click="openNote(note, { edit: () => editNote(note.name) })"
       >
         <div class="flex items-center justify-between gap-2">
@@ -83,6 +83,17 @@
           v-html="sanitizeHTML(note.content)"
         />
         <!-- eslint-enable vue/no-v-html -->
+        <div class="flex flex-col gap-1">
+          <router-link
+            v-for="linkedCall in noteCalls[note.name] || []"
+            :key="linkedCall.name"
+            :to="{ name: 'Call', params: { callId: linkedCall.name } }"
+            class="ig-inline-link text-ink-gray-7" @click.stop>
+            <span class="lucide-phone size-4 shrink-0" aria-hidden="true" />
+            {{ __('Llamada') }} · {{ linkedCall.start_time ? formatDate(linkedCall.start_time) : linkedCall.name }} · {{ linkedCall.status }}
+          </router-link>
+          <span v-if="!noteCalls[note.name]?.length" class="text-sm text-ink-gray-5">{{ __('Sin llamada asociada visible') }}</span>
+        </div>
         <div class="mt-2 flex items-center justify-between gap-2">
           <div class="flex items-center gap-2">
             <UserAvatar :user="note.owner" size="xs" />
@@ -149,6 +160,8 @@ const { openNote, noteLink, loadLinkedTitles, linkedRoute, linkedLabel } =
   useNoteView()
 
 const notes = ref({})
+const noteCalls = ref({})
+let noteCallsVersion = 0
 const loadMore = ref(1)
 const updatedPageCount = ref(20)
 const viewControls = ref(null)
@@ -163,7 +176,16 @@ watch(
 
 watch(
   () => notes.value?.data?.data,
-  (rows) => loadLinkedTitles(rows),
+  async (rows) => {
+    loadLinkedTitles(rows)
+    const version = ++noteCallsVersion
+    const names = (rows || []).map((row) => row.name)
+    if (!names.length) { noteCalls.value = {}; return }
+    try {
+      const calls = await call('crm.ig_extensions.api.notes.get_note_calls', { names })
+      if (version === noteCallsVersion) noteCalls.value = calls
+    } catch { if (version === noteCallsVersion) noteCalls.value = {} }
+  },
 )
 
 function copyNoteLink(name) {

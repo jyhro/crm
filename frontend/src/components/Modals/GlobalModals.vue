@@ -16,6 +16,7 @@
     v-model="showChangePasswordModal"
   />
   <AboutModal v-model="showAboutModal" />
+  <Settings />
   <NoteViewModal v-if="showNoteView" />
   <MentionHoverCard />
   <FieldLayoutDialogContainer />
@@ -24,6 +25,7 @@
 </template>
 <script setup>
 import CommandPalette from '@/components/CommandPalette/CommandPalette.vue'
+import Settings from '@/components/Settings/Settings.vue'
 import FieldLayoutDialogContainer from '@/components/Modals/FieldLayoutDialogContainer.vue'
 import ChangePasswordModal from '@/components/Modals/ChangePasswordModal.vue'
 import CreateDocumentModal from '@/components/Modals/CreateDocumentModal.vue'

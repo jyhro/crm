@@ -2,44 +2,13 @@
   <Dropdown :options="dropdownItems" v-bind="$attrs">
     <template #default="{ open }">
       <button
-        class="flex h-12 items-center rounded-5 py-2 duration-300 ease-in-out"
-        :class="
-          isCollapsed
-            ? 'w-auto px-0'
-            : open
-              ? 'w-full px-2 bg-surface-elevation-3 shadow-sm'
-              : 'w-full px-2 hover:bg-surface-gray-2'
-        "
+        class="ig-user-trigger rounded-5 px-2 py-2 duration-300 ease-in-out"
+        :class="[isCollapsed ? 'ig-user-trigger-collapsed' : 'ig-user-trigger-expanded', open ? 'bg-surface-elevation-3' : 'hover:bg-surface-gray-2']"
+        :aria-label="`${brand.name || 'International Graphics'} · ${user.full_name || ''}`"
       >
-        <BrandLogo v-model="brand" class="h-8 max-w-16 flex-shrink-0" />
-        <div
-          class="flex flex-1 flex-col text-left duration-300 ease-in-out truncate"
-          :class="
-            isCollapsed
-              ? 'ml-0 w-0 overflow-hidden opacity-0'
-              : 'ml-2 w-auto opacity-100'
-          "
-        >
-          <div class="text-base-medium leading-none text-ink-gray-9 truncate">
-            {{ __(brand.name || 'CRM') }}
-          </div>
-          <div class="mt-1 text-sm leading-none text-ink-gray-7 truncate">
-            {{ user.full_name }}
-          </div>
-        </div>
-        <div
-          class="duration-300 ease-in-out"
-          :class="
-            isCollapsed
-              ? 'ml-0 w-0 overflow-hidden opacity-0'
-              : 'ml-2 w-auto opacity-100'
-          "
-        >
-          <span
-            class="lucide-chevron-down size-4 text-ink-gray-5"
-            aria-hidden="true"
-          />
-        </div>
+        <BrandLogo v-model="brand" :class="isCollapsed ? 'h-8 w-8' : 'ig-user-brand h-14 w-full'" />
+        <span v-if="!isCollapsed" class="truncate text-left text-sm text-ink-gray-7">{{ user.full_name }}</span>
+        <span v-if="!isCollapsed" class="lucide-chevron-down size-4 text-ink-gray-5" aria-hidden="true" />
       </button>
     </template>
   </Dropdown>
@@ -52,7 +21,7 @@ import AppsIcon from '@/components/Icons/AppsIcon.vue'
 import { sessionStore } from '@/stores/session'
 import { usersStore } from '@/stores/users'
 import { getSettings } from '@/stores/settings'
-import { showSettings, isMobileView } from '@/composables/settings'
+import { showSettings, isMobileView, closeMobileSidebar } from '@/composables/settings'
 import { showAboutModal } from '@/composables/modals'
 import { confirmLoginToFrappeCloud } from '@/composables/frappecloud'
 import { useCloudSettings } from '@/composables/cloudSettings'
@@ -68,7 +37,7 @@ defineProps({
 const { settings, brand } = getSettings()
 const { logout } = sessionStore()
 const { available: canManageBilling, open: openBilling } = useCloudSettings()
-const { getUser } = usersStore()
+const { getUser, isAdmin } = usersStore()
 
 const user = computed(() => getUser() || {})
 
@@ -137,13 +106,14 @@ function getStandardItem(item) {
         icon: markRaw(AppsIcon),
         label: __(item.label),
         submenu: appMenuItems(),
+        // everyone else is kept inside the CRM (crm.utils.crm_only)
+        condition: () => isAdmin(),
       }
     case 'settings':
       return {
         icon: item.icon,
         label: __(item.label),
-        onClick: () => (showSettings.value = true),
-        condition: () => !isMobileView.value,
+        onClick: () => closeMobileSidebar(() => { showSettings.value = true }),
       }
     case 'login_to_fc':
       if (canManageBilling) {

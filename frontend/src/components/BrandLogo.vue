@@ -1,12 +1,10 @@
 <template>
-  <div v-if="brand?.logo">
-    <img :src="brand.logo" class="h-full w-auto max-w-full object-contain" />
+  <div class="ig-brand" :class="{ 'ig-brand-official': !brand?.logo || brand.logo === fallbackLogo }">
+    <img :src="brand.logo || fallbackLogo" :alt="brand.name || 'International Graphics'" />
   </div>
-  <CRMLogo v-else class="size-8 shrink-0 rounded-4" />
 </template>
 
 <script setup>
-import CRMLogo from '@/components/Icons/CRMLogo.vue'
-
+const fallbackLogo = '/assets/crm/images/international-graphics.png'
 const brand = defineModel({ type: Object, default: () => ({}) })
 </script>

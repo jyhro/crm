@@ -41,6 +41,11 @@ const routes = [
   {
     path: '/dashboard',
     name: 'Dashboard',
+    component: () => import('@/pages/WorkspaceDashboard.vue'),
+  },
+  {
+    path: '/dashboard/advanced',
+    name: 'Dashboard Advanced',
     component: () => import('@/pages/Dashboard.vue'),
   },
   {
@@ -103,6 +108,20 @@ const routes = [
     component: () => import(`@/pages/${handleMobileView('Organization')}.vue`),
     props: true,
   },
+  {
+    path: '/sales-orders',
+    name: 'Sales Orders',
+    component: () => import('@/pages/SalesOrders.vue'),
+  },
+  { path: '/products', name: 'Products', component: () => import('@/pages/Products.vue') },
+  { path: '/products/:productId', name: 'Product', component: () => import('@/pages/Product.vue'), props: true },
+  {
+    path: '/sales-orders/:orderId',
+    name: 'Sales Order',
+    component: () => import('@/pages/SalesOrder.vue'),
+    props: true,
+  },
+  { path: '/call-logs/detail/:callId', name: 'Call', component: () => import('@/pages/Call.vue'), props: true },
   {
     alias: '/call-logs',
     path: '/call-logs/view/:viewType?',

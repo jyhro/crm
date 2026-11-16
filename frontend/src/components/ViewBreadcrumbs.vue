@@ -9,7 +9,7 @@
           : 'text-ink-gray-7',
       ]"
     >
-      {{ __(routeName) }}
+      {{ __(routeName === 'Organizations' ? 'Clientes' : routeName === 'Dashboard' ? 'Reportes' : routeName) }}
     </router-link>
     <span
       v-if="viewControls && viewControls.viewsDropdownOptions"

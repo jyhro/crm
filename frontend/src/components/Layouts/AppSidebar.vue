@@ -8,7 +8,7 @@
        column falls through to the white page canvas. The token cannot be
        overridden on the Sidebar element itself — `bg-surface-sidebar` is emitted
        after `bg-surface-gray-1` in the utilities layer and would win. -->
-  <div class="relative flex h-full bg-surface-gray-1">
+  <div class="ig-sidebar relative flex h-full bg-surface-gray-1">
     <Sidebar
       v-model:collapsed="isSidebarCollapsed"
       :collapsible="!mobile"
@@ -127,7 +127,7 @@
             />
             <TrialCard v-if="!isCollapsed" />
             <GettingStartedBanner
-              v-if="!isOnboardingStepsCompleted"
+              v-if="isAdmin() && !isOnboardingStepsCompleted"
               :isSidebarCollapsed="isCollapsed"
             />
           </div>
@@ -168,12 +168,12 @@
   </div>
 
   <template v-if="!mobile">
-    <Settings />
     <HelpModal
       v-if="showHelpModal"
       v-model="showHelpModal"
       v-model:articles="articles"
-      :logo="CRMLogo"
+      :logo="BrandLogo"
+      :title="brand.name"
       :afterSkip="(step) => capture('onboarding_step_skipped_' + step)"
       :afterSkipAll="() => capture('onboarding_steps_skipped')"
       :afterReset="(step) => capture('onboarding_step_reset_' + step)"
@@ -189,7 +189,7 @@
 
 <script setup>
 import BrushCleaningIcon from '~icons/lucide/brush-cleaning'
-import CRMLogo from '@/components/Icons/CRMLogo.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import InviteIcon from '@/components/Icons/InviteIcon.vue'
 import ConvertIcon from '@/components/Icons/ConvertIcon.vue'
 import EmailIcon from '@/components/Icons/EmailIcon.vue'
@@ -212,13 +212,13 @@ import Notifications from '@/components/Notifications.vue'
 import KeyboardShortcut from '@/components/KeyboardShortcut.vue'
 import LucideSearch from '~icons/lucide/search'
 import { openCommandPalette } from '@/composables/useCommandPalette'
-import Settings from '@/components/Settings/Settings.vue'
 import { viewsStore } from '@/stores/views'
 import {
   unreadNotificationsCount,
   notificationsStore,
 } from '@/stores/notifications'
 import { usersStore } from '@/stores/users'
+import { getSettings } from '@/stores/settings'
 import { sessionStore } from '@/stores/session'
 import {
   showSettings,
@@ -253,6 +253,7 @@ const props = defineProps({
 })
 
 const route = useRoute()
+const { brand } = getSettings()
 
 const { getPinnedViews, getPublicViews } = viewsStore()
 const { toggle: toggleNotificationPanel } = notificationsStore()
@@ -341,7 +342,7 @@ function getIcon(routeName, icon) {
 
 // A saved view's key is its name; a plain nav item's key is its route name.
 function currentRouteKey() {
-  return route.query.view || route.name
+  return route.query.view || ({ 'Sales Order': 'Sales Orders', Product: 'Products', Organization: 'Organizations' }[route.name] || route.name)
 }
 
 // Set the highlight on click rather than waiting for the route, since route
@@ -393,7 +394,7 @@ function toggleHelpModal() {
 
 // onboarding
 const { user } = sessionStore()
-const { users, isManager } = usersStore()
+const { users, isManager, isAdmin } = usersStore()
 const { isOnboardingStepsCompleted, setUp } = useOnboarding('frappecrm')
 const { flushPendingSteps } = useCrmOnboarding()
 

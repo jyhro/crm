@@ -8,10 +8,19 @@
   >
     <template #default>
       <Dialog.Title class="sr-only">{{ __('Settings') }}</Dialog.Title>
-      <div class="flex h-[calc(100vh_-_8rem)] bg-surface-gray-1">
+      <div class="flex h-[calc(100dvh_-_4rem)] flex-col bg-surface-gray-1 sm:h-[calc(100vh_-_8rem)] sm:flex-row">
+        <div class="flex items-center gap-2 border-b border-outline-gray-2 p-3 sm:hidden">
+          <label class="sr-only" for="mobile-settings-section">{{ __('Sección de configuración') }}</label>
+          <select id="mobile-settings-section" :value="activeTab?.label" class="form-select min-w-0 flex-1" @change="activeSettingsPage = $event.target.value">
+            <optgroup v-for="group in tabs" :key="group.label" :label="group.label">
+              <option v-for="page in group.items" :key="page.label" :value="page.label">{{ page.label }}</option>
+            </optgroup>
+          </select>
+          <Button :label="__('Cerrar')" @click="showSettings = false" />
+        </div>
         <div
           ref="sidebarContainer"
-          class="flex flex-col m-1 rounded-l-6 w-56 shrink-0 bg-surface-gray-1 overflow-y-auto"
+          class="hidden sm:flex flex-col m-1 rounded-l-6 w-56 shrink-0 bg-surface-gray-1 overflow-y-auto"
         >
           <template v-for="(tab, i) in tabs" :key="tab.label">
             <div v-if="!tab.hideLabel && i != 0" class="mx-1 mb-0.5 mt-[5px]" />
@@ -42,7 +51,7 @@
           </template>
         </div>
         <div
-          class="flex flex-col flex-1 overflow-y-auto bg-surface-elevation-2"
+          class="flex min-w-0 flex-col flex-1 overflow-y-auto bg-surface-elevation-2"
         >
           <component :is="activeTab.component" v-if="activeTab" />
         </div>
@@ -92,7 +101,7 @@ import {
   disableSettingModalOutsideClick,
 } from '@/composables/settings'
 import { isWhatsAppInstalled } from '@/composables/whatsapp'
-import { Dialog, Avatar, SidebarItem } from 'frappe-ui'
+import { Dialog, Avatar, SidebarItem, Button } from 'frappe-ui'
 import { ref, markRaw, computed, watch, h, nextTick } from 'vue'
 import AssignmentRulePage from './AssignmentRules/AssignmentRulePage.vue'
 import ShieldCheck from '~icons/lucide/shield-check'
