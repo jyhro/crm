@@ -2,12 +2,40 @@ import json
 
 import frappe
 from frappe import _
+from frappe.database.query import RawCriterion
 from frappe.query_builder import Case, DocType
 from frappe.query_builder.functions import Avg, Coalesce, Count, Date, DateFormat, IfNull, Sum
 from pypika.functions import Function
 
 from crm.fcrm.doctype.crm_dashboard.crm_dashboard import create_default_manager_dashboard
 from crm.utils import sales_user_only
+
+
+def _permitted_names(doctype):
+	"""Keep aggregation inside native read permissions and the CRM portfolio scope."""
+	query = frappe.qb.get_query(doctype, fields=["name"], ignore_permissions=False)
+	from crm.permissions.org_hierarchy import get_lead_permission_query_conditions, get_deal_permission_query_conditions
+	condition = (get_lead_permission_query_conditions if doctype == "CRM Lead" else get_deal_permission_query_conditions)()
+	if condition:
+		# Mandatory even when the framework adds an outer DocShare OR branch.
+		query = query.where(RawCriterion(condition))
+	return query
+
+
+def _dashboard_query(doctype):
+	table = DocType(doctype)
+	return frappe.qb.from_(table).where(table.name.isin(_permitted_names(doctype)))
+
+
+def _dashboard_user(user):
+	from crm.ig_extensions.permissions.sales_scope import visible_users
+	roles = set(frappe.get_roles())
+	if "Sales User" in roles and not roles.intersection({"Sales Manager", "System Manager"}):
+		return frappe.session.user
+	allowed = visible_users()
+	if user and allowed is not None and user not in allowed:
+		frappe.throw(_("This salesperson is outside your authorized team."), frappe.PermissionError)
+	return user
 
 
 # Custom function for TIMESTAMPDIFF (MySQL/MariaDB)
@@ -33,12 +61,7 @@ def get_dashboard(from_date: str | None = None, to_date: str | None = None, user
 		from_date = frappe.utils.get_first_day(from_date or frappe.utils.nowdate())
 		to_date = frappe.utils.get_last_day(to_date or frappe.utils.nowdate())
 
-	roles = frappe.get_roles(frappe.session.user)
-	is_sales_manager = "Sales Manager" in roles or "System Manager" in roles
-	is_sales_user = "Sales User" in roles and not is_sales_manager
-
-	if is_sales_user:
-		user = frappe.session.user
+	user = _dashboard_user(user)
 
 	dashboard = frappe.db.exists("CRM Dashboard", "Manager Dashboard")
 
@@ -46,7 +69,7 @@ def get_dashboard(from_date: str | None = None, to_date: str | None = None, user
 
 	if not dashboard:
 		layout = json.loads(create_default_manager_dashboard())
-		frappe.db.commit()  # persist the auto-created default dashboard  # nosemgrep
+		# The request owns the transaction; do not commit unrelated pending writes here.
 	else:
 		layout = json.loads(frappe.db.get_value("CRM Dashboard", "Manager Dashboard", "layout") or "[]")
 
@@ -169,12 +192,7 @@ def get_chart(
 		from_date = frappe.utils.get_first_day(from_date or frappe.utils.nowdate())
 		to_date = frappe.utils.get_last_day(to_date or frappe.utils.nowdate())
 
-	roles = frappe.get_roles(frappe.session.user)
-	is_sales_manager = "Sales Manager" in roles or "System Manager" in roles
-	is_sales_user = "Sales User" in roles and not is_sales_manager
-
-	if is_sales_user:
-		user = frappe.session.user
+	user = _dashboard_user(user)
 
 	method_name = f"get_{name}"
 	if hasattr(frappe.get_attr("crm.api.dashboard"), method_name):
@@ -211,9 +229,7 @@ def get_total_leads(from_date: str | None = None, to_date: str | None = None, us
 	"""
 	Get lead count for the dashboard.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -231,7 +247,7 @@ def get_total_leads(from_date: str | None = None, to_date: str | None = None, us
 		prev_cond = prev_cond & (Lead.lead_owner == user)
 
 	# Build query with CASE expressions
-	query = frappe.qb.from_(Lead).select(
+	query = _dashboard_query("CRM Lead").select(
 		Count(Case().when(current_cond, Lead.name).else_(None)).as_("current_month_leads"),
 		Count(Case().when(prev_cond, Lead.name).else_(None)).as_("prev_month_leads"),
 	)
@@ -258,9 +274,7 @@ def get_ongoing_deals(from_date: str | None = None, to_date: str | None = None, 
 	"""
 	Get ongoing deal count for the dashboard, and also calculate average deal value for ongoing deals.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -286,7 +300,7 @@ def get_ongoing_deals(from_date: str | None = None, to_date: str | None = None, 
 
 	# Build query with CASE expressions
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.select(
@@ -319,9 +333,7 @@ def get_average_ongoing_deal_value(
 	"""
 	Get ongoing deal count for the dashboard, and also calculate average deal value for ongoing deals.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -350,7 +362,7 @@ def get_average_ongoing_deal_value(
 
 	# Build query with CASE expressions
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.select(
@@ -379,9 +391,7 @@ def get_won_deals(from_date: str | None = None, to_date: str | None = None, user
 	"""
 	Get won deal count for the dashboard, and also calculate average deal value for won deals.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -403,7 +413,7 @@ def get_won_deals(from_date: str | None = None, to_date: str | None = None, user
 
 	# Build query with CASE expressions
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.select(
@@ -436,9 +446,7 @@ def get_average_won_deal_value(
 	"""
 	Get won deal count for the dashboard, and also calculate average deal value for won deals.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -463,7 +471,7 @@ def get_average_won_deal_value(
 
 	# Build query with CASE expressions
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.select(
@@ -492,9 +500,7 @@ def get_average_deal_value(from_date: str | None = None, to_date: str | None = N
 	"""
 	Get average deal value for the dashboard.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -517,7 +523,7 @@ def get_average_deal_value(from_date: str | None = None, to_date: str | None = N
 
 	# Build query with CASE expressions
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.select(
@@ -548,9 +554,7 @@ def get_average_time_to_close_a_lead(
 	"""
 	Get average time to close deals for the dashboard.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -578,11 +582,11 @@ def get_average_time_to_close_a_lead(
 
 	# Build query
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.left_join(Lead)
-		.on(Deal.lead == Lead.name)
+		.on((Deal.lead == Lead.name) & Lead.name.isin(_permitted_names("CRM Lead")))
 		.where(base_cond)
 		.select(
 			Avg(Case().when(current_cond, time_diff).else_(None)).as_("current_avg_lead"),
@@ -613,9 +617,7 @@ def get_average_time_to_close_a_deal(
 	"""
 	Get average time to close deals for the dashboard.
 	"""
-	diff = frappe.utils.date_diff(to_date, from_date)
-	if diff == 0:
-		diff = 1
+	diff = max(frappe.utils.date_diff(to_date, from_date) + 1, 1)
 
 	prev_from_date = frappe.utils.add_days(from_date, -diff)
 	to_date_plus_one = frappe.utils.add_days(to_date, 1)
@@ -641,11 +643,11 @@ def get_average_time_to_close_a_deal(
 
 	# Build query
 	query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.left_join(Lead)
-		.on(Deal.lead == Lead.name)
+		.on((Deal.lead == Lead.name) & Lead.name.isin(_permitted_names("CRM Lead")))
 		.where(base_cond)
 		.select(
 			Avg(Case().when(current_cond, time_diff).else_(None)).as_("current_avg_deal"),
@@ -689,7 +691,7 @@ def get_sales_trend(from_date: str | None = None, to_date: str | None = None, us
 
 	# Build leads query
 	leads_query = (
-		frappe.qb.from_(Lead)
+		_dashboard_query("CRM Lead")
 		.select(
 			Date(Lead.creation).as_("date"),
 			Count("*").as_("leads"),
@@ -706,7 +708,7 @@ def get_sales_trend(from_date: str | None = None, to_date: str | None = None, us
 
 	# Build deals query
 	deals_query = (
-		frappe.qb.from_(Deal)
+		_dashboard_query("CRM Deal")
 		.join(Status)
 		.on(Deal.status == Status.name)
 		.select(
@@ -808,7 +810,7 @@ def get_forecasted_revenue(from_date: str | None = None, to_date: str | None = N
 	)
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.join(CRMDealStatus)
 		.on(CRMDeal.status == CRMDealStatus.name)
 		.select(
@@ -885,7 +887,7 @@ def get_funnel_conversion(from_date: str | None = None, to_date: str | None = No
 	CRMLead = DocType("CRM Lead")
 
 	query = (
-		frappe.qb.from_(CRMLead)
+		_dashboard_query("CRM Lead")
 		.select(Count("*").as_("count"))
 		.where(Date(CRMLead.creation).between(from_date, to_date))
 	)
@@ -945,7 +947,7 @@ def get_deals_by_stage_axis(
 	CRMDealStatus = DocType("CRM Deal Status")
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.join(CRMDealStatus)
 		.on(CRMDeal.status == CRMDealStatus.name)
 		.select(CRMDeal.status.as_("stage"), Count("*").as_("count"), CRMDealStatus.type.as_("status_type"))
@@ -994,7 +996,7 @@ def get_deals_by_stage_donut(
 	CRMDealStatus = DocType("CRM Deal Status")
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.join(CRMDealStatus)
 		.on(CRMDeal.status == CRMDealStatus.name)
 		.select(CRMDeal.status.as_("stage"), Count("*").as_("count"), CRMDealStatus.type.as_("status_type"))
@@ -1035,7 +1037,7 @@ def get_lost_deal_reasons(from_date: str | None = None, to_date: str | None = No
 	CRMDealStatus = DocType("CRM Deal Status")
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.join(CRMDealStatus)
 		.on(CRMDeal.status == CRMDealStatus.name)
 		.select(CRMDeal.lost_reason.as_("reason"), Count("*").as_("count"))
@@ -1085,7 +1087,7 @@ def get_leads_by_source(from_date: str | None = None, to_date: str | None = None
 	CRMLead = DocType("CRM Lead")
 
 	query = (
-		frappe.qb.from_(CRMLead)
+		_dashboard_query("CRM Lead")
 		.select(IfNull(CRMLead.source, "Empty").as_("source"), Count("*").as_("count"))
 		.where(Date(CRMLead.creation).between(from_date, to_date))
 		.groupby(CRMLead.source)
@@ -1123,7 +1125,7 @@ def get_deals_by_source(from_date: str | None = None, to_date: str | None = None
 	CRMDeal = DocType("CRM Deal")
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.select(IfNull(CRMDeal.source, "Empty").as_("source"), Count("*").as_("count"))
 		.where(Date(CRMDeal.creation).between(from_date, to_date))
 		.groupby(CRMDeal.source)
@@ -1161,7 +1163,7 @@ def get_deals_by_territory(from_date: str | None = None, to_date: str | None = N
 	CRMDeal = DocType("CRM Deal")
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.select(
 			IfNull(CRMDeal.territory, "Empty").as_("territory"),
 			Count("*").as_("deals"),
@@ -1222,7 +1224,7 @@ def get_deals_by_salesperson(
 	User = DocType("User")
 
 	query = (
-		frappe.qb.from_(CRMDeal)
+		_dashboard_query("CRM Deal")
 		.left_join(User)
 		.on(User.name == CRMDeal.deal_owner)
 		.select(
@@ -1302,6 +1304,7 @@ def get_deal_status_change_counts(
 		frappe.qb.from_(CRMStatusChangeLog)
 		.join(CRMDeal)
 		.on(CRMStatusChangeLog.parent == CRMDeal.name)
+		.where(CRMDeal.name.isin(_permitted_names("CRM Deal")))
 		.join(CurrentStatus)
 		.on(CRMDeal.status == CurrentStatus.name)
 		.join(TargetStatus)

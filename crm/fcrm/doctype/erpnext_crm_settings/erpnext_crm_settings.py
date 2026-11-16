@@ -992,6 +992,87 @@ def update_sales_order_items(name: str, items: list[dict], delivery_date: str | 
 
 
 @frappe.whitelist()
+def get_my_sales_orders(limit: int = 50, start: int = 0):
+	"""Orders for the CRM "Pedidos" page: one's own, or everyone's for managers."""
+	settings = frappe.get_single("ERPNext CRM Settings")
+	if not settings.enabled or settings.is_erpnext_in_different_site or not _is_erpnext_installed():
+		return []
+	if not frappe.has_permission("Sales Order", ptype="read"):
+		return []
+	filters = {}
+	if not {"Sales Manager", "System Manager"} & set(frappe.get_roles()):
+		filters["owner"] = frappe.session.user
+	return frappe.get_list(
+		"Sales Order",
+		filters=filters,
+		fields=[*SALES_ORDER_LIST_FIELDS, "owner"],
+		order_by="creation desc, name desc",
+		limit=min(max(int(limit), 1), 200),
+		offset=max(int(start), 0),
+	)
+
+
+def _get_sales_order_for_crm(name: str, ptype: str):
+	_get_inline_quotation_settings()  # ensures local erpnext + enabled
+	if not frappe.has_permission("Sales Order", ptype=ptype, doc=name):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	return frappe.get_doc("Sales Order", name)
+
+
+@frappe.whitelist()
+def get_sales_order_detail(name: str):
+	so = _get_sales_order_for_crm(name, "read")
+	is_draft = so.docstatus == 0
+	return {
+		"name": so.name,
+		"status": so.status,
+		"docstatus": so.docstatus,
+		"customer": so.customer,
+		"customer_name": so.customer_name,
+		"organization": frappe.db.exists("CRM Organization", so.customer_name),
+		"transaction_date": so.transaction_date,
+		"delivery_date": so.delivery_date,
+		"currency": so.currency,
+		"total": so.total,
+		"total_taxes_and_charges": so.total_taxes_and_charges,
+		"grand_total": so.grand_total,
+		"owner": so.owner,
+		"items": [
+			{
+				"item_code": row.item_code,
+				"item_name": row.item_name,
+				"qty": row.qty,
+				"uom": row.uom,
+				"rate": row.rate,
+				"amount": row.amount,
+			}
+			for row in so.items
+		],
+		"can_edit": is_draft and bool(so.has_permission("write")),
+		"can_delete": is_draft and bool(so.has_permission("delete")),
+		"can_mark_ready": is_draft and bool(so.has_permission("submit")),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_sales_order(name: str):
+	so = _get_sales_order_for_crm(name, "delete")
+	if so.docstatus != 0:
+		frappe.throw(_("Only draft sales orders can be deleted from CRM"), frappe.ValidationError)
+	so.delete()
+
+
+@frappe.whitelist(methods=["POST"])
+def mark_sales_order_ready(name: str):
+	"""A ready order is a submitted one: it can no longer be edited or deleted."""
+	so = _get_sales_order_for_crm(name, "submit")
+	if so.docstatus != 0:
+		frappe.throw(_("Only draft sales orders can be marked as ready"), frappe.ValidationError)
+	so.submit()
+	return {"name": so.name, "docstatus": so.docstatus, "status": so.status}
+
+
+@frappe.whitelist()
 def get_crm_form_script():
 	return """class CRMDeal {
 	onLoad() {

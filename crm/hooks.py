@@ -403,7 +403,7 @@ ignore_links_on_delete = ["Failed Lead Sync Log"]
 
 # Request Events
 # ----------------
-# before_request = ["crm.utils.before_request"]
+before_request = ["crm.utils.crm_only.confine_to_crm"]
 # after_request = ["crm.utils.after_request"]
 
 # Job Events
@@ -450,6 +450,7 @@ after_migrate = [
 	"crm.domain_enrichment.install.seed_default_rules_and_mappings",
 	"crm.install.add_default_scripts",
 	"crm.install.add_web_form_custom_fields",
+	"crm.utils.crm_only.make_crm_the_default_app",
 ]
 
 sqlite_search = ["crm.search_sqlite.CRMSearch"]
@@ -500,3 +501,39 @@ standard_dropdown_items = [
 		"is_standard": 1,
 	},
 ]
+
+
+# International Graphics integrated fork: server boundaries and native transactions.
+permission_query_conditions.update({'CRM Call Log': 'crm.ig_extensions.permissions.call_log.query_condition',
+ 'CRM Organization': 'crm.ig_extensions.permissions.customer_scope.organization_query',
+ 'Customer': 'crm.ig_extensions.permissions.customer_scope.customer_query',
+ 'Contact': 'crm.ig_extensions.permissions.customer_scope.contact_query',
+ 'Address': 'crm.ig_extensions.permissions.customer_scope.address_query',
+ 'Sales Order': 'crm.ig_extensions.permissions.sales_order.get_permission_query_conditions',
+ 'FCRM Note': 'crm.ig_extensions.permissions.note.query_condition',
+ 'Item Price': 'crm.ig_extensions.permissions.price.query_condition'})
+has_permission.update({'CRM Call Log': 'crm.ig_extensions.permissions.call_log.has_permission',
+ 'CRM Organization': 'crm.ig_extensions.permissions.customer_scope.has_permission',
+ 'Customer': 'crm.ig_extensions.permissions.customer_scope.has_permission',
+ 'Contact': 'crm.ig_extensions.permissions.customer_scope.has_permission',
+ 'Address': 'crm.ig_extensions.permissions.customer_scope.has_permission',
+ 'Sales Order': 'crm.ig_extensions.permissions.sales_order.has_permission',
+ 'FCRM Note': 'crm.ig_extensions.permissions.note.has_permission',
+ 'Item Price': 'crm.ig_extensions.permissions.price.has_permission'})
+extend_doctype_class.update({'FCRM Settings': ['crm.ig_extensions.overrides.FCRMSettingsAccess']})
+override_whitelisted_methods = {'crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.get_customer_link': 'crm.ig_extensions.integration.get_customer_link',
+ 'crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.get_sales_order_url_for_organization': 'crm.ig_extensions.integration.get_sales_order_url_for_organization',
+ 'crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.get_my_sales_orders': 'crm.ig_extensions.integration.get_my_sales_orders',
+ 'crm.fcrm.doctype.erpnext_crm_settings.erpnext_crm_settings.get_organization_sales_orders': 'crm.ig_extensions.integration.get_organization_sales_orders',
+ 'frappe.apps.get_apps': 'crm.ig_extensions.integration.get_apps',
+ 'crm.integrations.api.add_note_to_call_log': 'crm.ig_extensions.api.notes.add_note_to_call_log'}
+doc_events.setdefault('*', {}).setdefault('validate', []).extend(['crm.ig_extensions.permissions.customer_scope.validate_customer_links'])
+doc_events.setdefault('CRM Organization', {}).setdefault('before_rename', []).extend(['crm.ig_extensions.permissions.customer_scope.before_rename'])
+doc_events.setdefault('Sales Order', {}).setdefault('before_validate', []).extend(['crm.ig_extensions.permissions.sales_order.validate_creator'])
+doc_events.setdefault('CRM Call Log', {}).setdefault('validate', []).extend(['crm.ig_extensions.permissions.call_log.validate_agent'])
+doc_events.setdefault('User', {}).setdefault('before_validate', []).extend(['crm.ig_extensions.permissions.profile.validate_profile'])
+before_request.append("crm.ig_extensions.utils.crm_only.confine_to_crm")
+auth_hooks = ["crm.ig_extensions.utils.crm_only.enforce_crm_access"]
+update_website_context = ["crm.ig_extensions.branding.website_context"]
+after_install.append("crm.ig_extensions.install.apply_configuration")
+after_migrate.append("crm.ig_extensions.install.apply_configuration")

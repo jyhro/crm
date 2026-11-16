@@ -2,6 +2,8 @@
 # See license.txt
 
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import frappe
@@ -42,22 +44,30 @@ class TestDashboard(IntegrationTestCase):
 		"""Set up test records once for all tests"""
 		super().setUpClass()
 
-		# Mark timestamp before creating test data
-		cls.test_start_time = frappe.utils.now()
+		cls.user = "crm.manager@example.com"
+		cls.user2_email = "crm.user1@example.com"
+		# Shared dependencies may already exist; never delete or retime them.
+		for doctype in ["CRM Lead Status", "CRM Deal Status", "CRM Lead Source", "CRM Lost Reason", "CRM Organization"]:
+			make_test_records(doctype)
+		frappe.db.commit()
 
-		cls.from_date = get_first_day(nowdate())
-		cls.to_date = get_last_day(nowdate())
-		cls.user = "crm.manager@example.com"  # CRM manager from test_records.json
-		cls.user2_email = "crm.user1@example.com"  # Test user from test_records.json
-
-		# Load test records from test_records.json files in dependency order
-		make_test_records("CRM Lead Status")
-		make_test_records("CRM Deal Status")
-		make_test_records("CRM Lead Source")
-		make_test_records("CRM Lost Reason")
-		make_test_records("CRM Organization")  # Load organizations before deals
-		make_test_records("CRM Lead")
-		make_test_records("CRM Deal")
+		# Use an empty, historical month, not the site's current business period.
+		# Materialize this class's exact 35/32 JSON fixtures inside its rollback.
+		start = frappe.utils.getdate("2001-01-01")
+		while any(frappe.db.exists(dt, {field: ["between", [start, get_last_day(start)]]})
+			for dt, field in [("CRM Lead", "creation"), ("CRM Deal", "creation"), ("CRM Deal", "closed_date")]):
+			start = frappe.utils.add_months(start, 1)
+		cls.from_date, cls.to_date = get_first_day(start), get_last_day(start)
+		cls.fixture_names = {"CRM Lead": [], "CRM Deal": []}
+		for doctype, slug in [("CRM Lead", "crm_lead"), ("CRM Deal", "crm_deal")]:
+			path = Path(frappe.get_app_path("crm", "fcrm", "doctype", slug, "test_records.json"))
+			for record in json.loads(path.read_text()):
+				doc = frappe.get_doc(record).insert()
+				cls.fixture_names[doctype].append(doc.name)
+				values = {"creation": str(start) + " 12:00:00"}
+				if doctype == "CRM Deal" and doc.closed_date:
+					values["closed_date"] = str(start) + " 12:00:00"
+				frappe.db.set_value(doctype, doc.name, values, update_modified=False)
 
 	@classmethod
 	def tearDownClass(cls):
@@ -464,6 +474,8 @@ class TestDashboard(IntegrationTestCase):
 				"deal_owner": "Administrator",
 			}
 		).insert()
+
+		frappe.db.set_value("CRM Deal", deal.name, "creation", str(self.from_date) + " 12:00:00", update_modified=False)
 
 		# Toggle the status back and forth: this appends multiple status change log rows,
 		# including two "Won" transitions and one "Negotiation" transition.
