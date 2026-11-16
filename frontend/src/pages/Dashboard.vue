@@ -89,7 +89,7 @@
         :value="filters.user && getUser(filters.user).full_name"
         doctype="User"
         :filters="{
-          name: ['in', users.data.crmUsers?.map((u) => u.name)],
+          name: ['in', salesUsers.data?.map((u) => u.value) || []],
           ignore_user_type: 1,
         }"
         :placeholder="__('Sales User')"
@@ -117,6 +117,11 @@
       </Link>
     </div>
 
+    <ErrorMessage
+      v-if="dashboardItems.error"
+      class="mx-5 my-2"
+      :message="dashboardItems.error.messages?.[0] || __('No se pudo cargar el reporte. Revisa los filtros y vuelve a intentarlo.')"
+    />
     <div class="w-full overflow-y-scroll">
       <DashboardGrid
         v-if="!dashboardItems.loading && dashboardItems.data"
@@ -158,10 +163,15 @@ import {
   DateRangePicker,
   Dropdown,
   Tooltip,
+  ErrorMessage,
 } from 'frappe-ui'
 import { ref, reactive, computed, provide } from 'vue'
 
-const { users, getUser, isManager, isAdmin } = usersStore()
+const { getUser, isManager, isAdmin } = usersStore()
+const salesUsers = createResource({
+  url: 'crm.ig_extensions.api.workspace.get_sales_users',
+  auto: true,
+})
 const { brand } = getSettings()
 
 const editing = ref(false)

@@ -5,7 +5,8 @@ export type DashboardDateRange = string | [string, string] | [] | null
 export function getLastXDays(range: number = 30): string | null {
   const today = new Date()
   const lastXDate = new Date(today)
-  lastXDate.setDate(today.getDate() - range)
+  // Both endpoints are included by the dashboard API.
+  lastXDate.setDate(today.getDate() - Math.max(range, 1) + 1)
 
   return `${dayjs(lastXDate).format('YYYY-MM-DD')},${dayjs(today).format(
     'YYYY-MM-DD',

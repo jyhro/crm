@@ -147,8 +147,8 @@
 
 
 .ig-user-trigger { flex-shrink: 0; }
-.ig-user-trigger-expanded { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) 16px; grid-template-rows: 56px 20px; gap: 4px 8px; }
-.ig-user-trigger-expanded .ig-user-brand { grid-column: 1 / -1; }
+.ig-user-trigger-expanded { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) 16px; grid-template-rows: 44px 20px; gap: 4px 8px; }
+.ig-user-trigger-expanded .ig-user-brand { grid-column: 1 / -1; height: 44px; max-width: 164px; }
 .ig-user-trigger-collapsed { display: flex; align-items: center; justify-content: center; }
 .ig-outcome-legend { display: grid; gap: 8px; margin: 16px 0; }
 .ig-outcome-legend li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
